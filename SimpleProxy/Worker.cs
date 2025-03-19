@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 
 namespace SimpleProxy;
 
-public sealed class Worker(IOptions<ProxyOption> option, IConnectionManager manager, ILogger<IConnection> logger) : BackgroundService
+public sealed class Worker(IOptions<ProxyOption> option, ITunnelListener manager, ILogger<ITunnel> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -10,7 +10,7 @@ public sealed class Worker(IOptions<ProxyOption> option, IConnectionManager mana
         await foreach (var connection in manager.ListenAsync(option.Value.Host, option.Value.Port, stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested) break;
-            var wrappedConnection = new LoggerConnection(connection, logger);
+            var wrappedConnection = new LoggerTunnel(connection, logger);
             _ = Task.Run(() => wrappedConnection.ProcessAsync(stoppingToken), stoppingToken);
         }
     }

@@ -2,11 +2,10 @@
 
 namespace SimpleProxy.Http;
 
-internal sealed class HttpConnection(TcpClient client) : IConnection
+internal sealed class HttpTunnel(TcpClient client) : ITunnel
 {
     private readonly byte[] _buffer = new byte[65536];
-    private readonly HttpRemoteConnection _keeper = new();
-    private readonly byte[] _serverBuffer = new byte[65536];
+    private readonly HttpRemoteConnectionFactory _keeper = new();
     private TcpClient? _server;
     private CancellationToken _token;
 
@@ -14,21 +13,14 @@ internal sealed class HttpConnection(TcpClient client) : IConnection
     {
         _token = token;
 
-        // Connect
+        // Construct
         var stream = client.GetStream();
         var count = await stream.ReadAsync(_buffer, 0, _buffer.Length, _token);
-        _server = await _keeper.GetServerAsync(new Memory<byte>(_buffer, 0, count), client, _token);
+        var remote = _keeper.GetProxyStrategy(new Span<byte>(_buffer, 0, count), client);
 
         // Tunnel
-        switch (_keeper.Flow)
-        {
-            case HttpRemoteConnection.HttpNoForward:
-                await ListenAsync(_server, client, _serverBuffer);
-                return;
-            case HttpRemoteConnection.HttpsNoForward:
-                await Task.WhenAll(TunnelAsync(_server, client, _serverBuffer), TunnelAsync(client, _server, _buffer));
-                return;
-        }
+        await remote.ConnectAsync(_keeper.Host!, _keeper.Port, new Memory<byte>(_buffer, 0, count), _token);
+        await remote.TunnelAsync(client, ListenAsync, token);
     }
 
     public string Host => _keeper.Host!;
@@ -51,13 +43,5 @@ internal sealed class HttpConnection(TcpClient client) : IConnection
         if (!to.Connected) return false;
         await to.GetStream().WriteAsync(new Memory<byte>(buffer, 0, count), _token);
         return true;
-    }
-    
-    private async Task TunnelAsync(TcpClient from, TcpClient to, byte[] buffer)
-    {
-        while (!_token.IsCancellationRequested && from.Connected && to.Connected)
-        {
-            if (!await ListenAsync(from, to, buffer)) return;
-        }
     }
 }

@@ -1,6 +1,6 @@
 ﻿namespace SimpleProxy;
 
-public sealed class LoggerConnection(IConnection connection, ILogger<IConnection> logger) : IConnection
+public sealed class LoggerTunnel(ITunnel tunnel, ILogger<ITunnel> logger) : ITunnel
 {
     public async Task ProcessAsync(CancellationToken token)
     {
@@ -8,7 +8,7 @@ public sealed class LoggerConnection(IConnection connection, ILogger<IConnection
         activity.Start();
         try
         {
-            await connection.ProcessAsync(token);
+            await tunnel.ProcessAsync(token);
         }
         catch (Exception e)
         {
@@ -16,18 +16,18 @@ public sealed class LoggerConnection(IConnection connection, ILogger<IConnection
         }
         finally
         {
-            connection.Dispose();
+            tunnel.Dispose();
             activity.Stop();
-            logger.LogInformation("Connection {Host}:{Port} - {Time}ms", connection.Host, connection.Port, activity.Duration.TotalMilliseconds);
+            logger.LogInformation("Connection {Host}:{Port} - {Time}ms", tunnel.Host, tunnel.Port, activity.Duration.TotalMilliseconds);
         }
     }
 
-    public string Host => connection.Host;
+    public string Host => tunnel.Host;
 
-    public int Port => connection.Port;
+    public int Port => tunnel.Port;
 
     public void Dispose()
     {
-        connection.Dispose();
+        tunnel.Dispose();
     }
 }

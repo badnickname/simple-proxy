@@ -1,21 +1,19 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using SimpleProxy.Http.Strategies;
+using SimpleProxy.Http.RemoteConnection;
 
 namespace SimpleProxy.Http;
 
-internal sealed class HttpRemoteConnection : IDisposable
+internal sealed class HttpRemoteConnectionFactory
 {
     private const int HostHash = 504;
     private const int ConnectHash = 408;
-    private TcpClient? _cached;
     private TcpClient _client;
     private readonly byte[] _hostBytes = [72, 111, 115, 116, 58, 32];
     private readonly byte[] _connectBytes = [67, 79, 78, 78, 69, 67, 84, 32];
     public const int HttpNoForward = 0;
     public const int HttpsNoForward = 1;
-    private IProxyStrategy? _strategy;
 
     public string? Host { get; private set; }
 
@@ -23,19 +21,14 @@ internal sealed class HttpRemoteConnection : IDisposable
 
     public int Flow { get; private set; }
 
-    public async ValueTask<TcpClient> GetServerAsync(Memory<byte> bytes, TcpClient client, CancellationToken token)
+    public IRemoteConnection GetProxyStrategy(Span<byte> bytes, TcpClient client)
     {
-        if (_cached is not null) return _cached;
         _client = client;
-        _strategy = CreateProxyStrategy(bytes);
-        _cached = await _strategy.ConnectAsync(Host!, Port, bytes, token);
-        return _cached;
+        return CreateProxyStrategy(bytes);
     }
 
-    private IProxyStrategy CreateProxyStrategy(Memory<byte> bytes)
+    private IRemoteConnection CreateProxyStrategy(Span<byte> content)
     {
-        var content = bytes.Span;
-
         // Найти Host по алгоритму Рабина-Карпа
         var hash = 0;
         var l = 0;
@@ -121,20 +114,14 @@ internal sealed class HttpRemoteConnection : IDisposable
         return list;
     }
 
-    private IProxyStrategy CreateProxyStrategy(int strategy)
+    private IRemoteConnection CreateProxyStrategy(int strategy)
     {
         Flow = strategy;
         return strategy switch
         {
-            HttpNoForward => new ProxyHttpNoForwardStrategy(),
+            HttpNoForward => new ProxyHttpNoForwardRemoteConnection(),
             HttpsNoForward => new ProxyHttpsNoForwardStrategy(_client),
             _ => throw new ProtocolViolationException("Incompatible HTTP strategy type")
         };
-    }
-
-    public void Dispose()
-    {
-        _cached?.Dispose();
-        _strategy?.Dispose();
     }
 }
