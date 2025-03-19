@@ -1,14 +1,11 @@
-﻿using System.Net.NetworkInformation;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 
 namespace SimpleProxy.Http;
 
-internal sealed class HttpConnection(TcpClient client) : IConnection, IDisposable
+internal sealed class HttpConnection(TcpClient client) : IConnection
 {
     private readonly byte[] _buffer = new byte[65536];
-    private readonly Dictionary<TcpClient, TcpConnectionInformation> _connections = new();
-    private readonly Queue<Func<Task>> _queue = new();
-    private readonly HttpRemoteServerKeeper _keeper = new();
+    private readonly HttpRemoteConnection _keeper = new();
     private readonly byte[] _serverBuffer = new byte[65536];
     private TcpClient? _server;
     private CancellationToken _token;
@@ -16,14 +13,21 @@ internal sealed class HttpConnection(TcpClient client) : IConnection, IDisposabl
     public async Task ProcessAsync(CancellationToken token)
     {
         _token = token;
-        _queue.Enqueue(ReceiveFromClientAsync);
-        try
+
+        // Connect
+        var stream = client.GetStream();
+        var count = await stream.ReadAsync(_buffer, 0, _buffer.Length, _token);
+        _server = await _keeper.GetServerAsync(new Memory<byte>(_buffer, 0, count), client, _token);
+
+        // Tunnel
+        switch (_keeper.Flow)
         {
-            while (!_token.IsCancellationRequested && _queue.TryDequeue(out var action)) await action();
-        }
-        finally
-        {
-            Dispose();
+            case HttpRemoteConnection.HttpNoForward:
+                await ListenAsync(_server, client, _serverBuffer);
+                return;
+            case HttpRemoteConnection.HttpsNoForward:
+                await Task.WhenAll(TunnelAsync(_server, client, _serverBuffer), TunnelAsync(client, _server, _buffer));
+                return;
         }
     }
 
@@ -33,58 +37,27 @@ internal sealed class HttpConnection(TcpClient client) : IConnection, IDisposabl
 
     public void Dispose()
     {
+        client.GetStream().Dispose();
         client.Dispose();
+        _server?.GetStream().Dispose();
         _server?.Dispose();
     }
 
-    private async Task ReceiveFromClientAsync()
+    private async Task<bool> ListenAsync(TcpClient from, TcpClient to, byte[] buffer)
     {
-        if (!IsActive(client)) return;
-        var stream = client.GetStream();
-        var count = await stream.ReadAsync(_buffer, 0, _buffer.Length, _token);
-        if (count > 0) _queue.Enqueue(async () => await SendToServerAsync(new Memory<byte>(_buffer, 0, count)));
-    }
+        var count = await from.GetStream().ReadAsync(buffer, _token);
+        if (count < 1) return false;
 
-    private async Task SendToClientAsync(Memory<byte> content)
-    {
-        var stream = client.GetStream();
-        await stream.WriteAsync(content, _token);
-        _queue.Enqueue(ReceiveFromClientAsync);
+        if (!to.Connected) return false;
+        await to.GetStream().WriteAsync(new Memory<byte>(buffer, 0, count), _token);
+        return true;
     }
-
-    private async Task SendToServerAsync(Memory<byte> content)
+    
+    private async Task TunnelAsync(TcpClient from, TcpClient to, byte[] buffer)
     {
-        var (server, first) = await _keeper.GetServerAsync(content, client, _token);
-        _server = server;
-        if (!first) await _server.GetStream().WriteAsync(content, _token);
-        _queue.Enqueue(ReceiveFromServerAsync);
-    }
-
-    private async Task ReceiveFromServerAsync()
-    {
-        if (!IsActive(_server!)) return;
-        var stream = _server!.GetStream();
-        var count = await stream.ReadAsync(_serverBuffer, 0, _serverBuffer.Length, _token);
-        if (count > 0) _queue.Enqueue(async () => await SendToClientAsync(new Memory<byte>(_serverBuffer, 0, count)));
-    }
-
-    private bool IsActive(TcpClient tcpClient)
-    {
-        TcpState state;
-        if (_connections.TryGetValue(tcpClient, out var connection))
+        while (!_token.IsCancellationRequested && from.Connected && to.Connected)
         {
-            state = connection.State;
+            if (!await ListenAsync(from, to, buffer)) return;
         }
-        else
-        {
-            var connections = IPGlobalProperties
-                .GetIPGlobalProperties()
-                .GetActiveTcpConnections();
-            connection = Array.Find(connections, x => x.RemoteEndPoint.Equals(tcpClient.Client.RemoteEndPoint));
-            if (connection is not null) _connections.Add(tcpClient, connection);
-            state = connection?.State ?? TcpState.Unknown;
-        }
-
-        return state is TcpState.Established or TcpState.Listen or TcpState.SynReceived or TcpState.SynSent or TcpState.TimeWait or TcpState.Unknown;
     }
 }

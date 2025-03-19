@@ -5,30 +5,31 @@ using SimpleProxy.Http.Strategies;
 
 namespace SimpleProxy.Http;
 
-internal sealed class HttpRemoteServerKeeper : IDisposable
+internal sealed class HttpRemoteConnection : IDisposable
 {
     private const int HostHash = 504;
     private const int ConnectHash = 408;
-    private (TcpClient, bool)? _cached;
+    private TcpClient? _cached;
     private TcpClient _client;
     private readonly byte[] _hostBytes = [72, 111, 115, 116, 58, 32];
     private readonly byte[] _connectBytes = [67, 79, 78, 78, 69, 67, 84, 32];
-    private const int HttpNoForward = 0;
-    private const int HttpsNoForward = 1;
+    public const int HttpNoForward = 0;
+    public const int HttpsNoForward = 1;
     private IProxyStrategy? _strategy;
 
     public string? Host { get; private set; }
 
     public int Port { get; private set; }
 
-    public async ValueTask<(TcpClient, bool)> GetServerAsync(Memory<byte> bytes, TcpClient client, CancellationToken token)
+    public int Flow { get; private set; }
+
+    public async ValueTask<TcpClient> GetServerAsync(Memory<byte> bytes, TcpClient client, CancellationToken token)
     {
-        if (_cached.HasValue) return _cached.Value;
+        if (_cached is not null) return _cached;
         _client = client;
         _strategy = CreateProxyStrategy(bytes);
-        var server = await _strategy.ConnectAsync(Host!, Port, bytes, token);
-        _cached = (server, false);
-        return (server, true);
+        _cached = await _strategy.ConnectAsync(Host!, Port, bytes, token);
+        return _cached;
     }
 
     private IProxyStrategy CreateProxyStrategy(Memory<byte> bytes)
@@ -122,6 +123,7 @@ internal sealed class HttpRemoteServerKeeper : IDisposable
 
     private IProxyStrategy CreateProxyStrategy(int strategy)
     {
+        Flow = strategy;
         return strategy switch
         {
             HttpNoForward => new ProxyHttpNoForwardStrategy(),
@@ -132,7 +134,7 @@ internal sealed class HttpRemoteServerKeeper : IDisposable
 
     public void Dispose()
     {
-        _cached?.Item1.Dispose();
+        _cached?.Dispose();
         _strategy?.Dispose();
     }
 }

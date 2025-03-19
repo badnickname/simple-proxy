@@ -2,5 +2,5 @@
 
 public interface IConnectionManager
 {
-    IAsyncEnumerable<IConnection> ListenAsync(CancellationToken token);
+    IAsyncEnumerable<IConnection> ListenAsync(string host, int port, CancellationToken token);
 }

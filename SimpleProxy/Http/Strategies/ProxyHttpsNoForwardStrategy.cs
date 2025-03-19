@@ -1,5 +1,4 @@
-﻿using System.Net;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 
 namespace SimpleProxy.Http.Strategies;
 
@@ -16,8 +15,6 @@ internal sealed class ProxyHttpsNoForwardStrategy(TcpClient client) : IProxyStra
         var count = await stream.ReadAsync(bytes, token);
 
         var server = new TcpClient();
-        server.NoDelay = true;
-        server.Client.NoDelay = true;
         await server.ConnectAsync(host, port, token);
 
         await server.GetStream().WriteAsync(bytes, 0, count, token);

@@ -1,6 +1,6 @@
 ﻿namespace SimpleProxy;
 
-public interface IConnection
+public interface IConnection : IDisposable
 {
     Task ProcessAsync(CancellationToken token);
 

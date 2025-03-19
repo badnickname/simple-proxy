@@ -16,6 +16,7 @@ public sealed class LoggerConnection(IConnection connection, ILogger<IConnection
         }
         finally
         {
+            connection.Dispose();
             activity.Stop();
             logger.LogInformation("Connection {Host}:{Port} - {Time}ms", connection.Host, connection.Port, activity.Duration.TotalMilliseconds);
         }
@@ -24,4 +25,9 @@ public sealed class LoggerConnection(IConnection connection, ILogger<IConnection
     public string Host => connection.Host;
 
     public int Port => connection.Port;
+
+    public void Dispose()
+    {
+        connection.Dispose();
+    }
 }

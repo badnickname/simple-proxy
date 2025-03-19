@@ -1,15 +1,17 @@
+using Microsoft.Extensions.Options;
+
 namespace SimpleProxy;
 
-public sealed class Worker(IConnectionManager manager) : BackgroundService
+public sealed class Worker(IOptions<ProxyOption> option, IConnectionManager manager, ILogger<IConnection> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        ThreadPool.SetMaxThreads(2, 2);
-        await foreach (var connection in manager.ListenAsync(stoppingToken))
+        ThreadPool.SetMaxThreads(option.Value.Threads, option.Value.Threads);
+        await foreach (var connection in manager.ListenAsync(option.Value.Host, option.Value.Port, stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested) break;
-            ThreadPool.SetMaxThreads(2, 2);
-            _ = Task.Run(async () => await connection.ProcessAsync(stoppingToken), stoppingToken);
+            var wrappedConnection = new LoggerConnection(connection, logger);
+            _ = Task.Run(() => wrappedConnection.ProcessAsync(stoppingToken), stoppingToken);
         }
     }
 }
